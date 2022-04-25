@@ -1,0 +1,30 @@
+#
+# Build jobs for Python projects
+#
+
+include:
+  # NOTE: gitlab-ci's 'include' system can't handle multiple includes
+  #       of the same file, so we have to make each include of
+  #       /python/base.yml unique by adding a unique number of
+  #       leading slashes
+  - local: '//python/base.yml'
+
+.python:dist:
+  extends:
+    - .python:base
+  image: python
+  needs: []
+  before_script:
+    - ${PYTHON:="python"} -m pip install
+          build
+          ${BUILD_REQUIRES}
+  script:
+    - ${PYTHON} -m build ${SRCDIR:="."}
+          --sdist
+          --wheel
+          --outdir ${CI_PROJECT_DIR}
+          ${BUILD_OPTIONS}
+  artifacts:
+    paths:
+      - "*.tar.*"
+      - "*.whl"

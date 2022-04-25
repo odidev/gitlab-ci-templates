@@ -1,0 +1,33 @@
+#
+# Templates for Code Quality
+#
+
+# -- Code Quality combine ---
+# combine multiple code
+# quality JSON reports
+# ---------------------------
+
+.codequality:combine:
+  image: python:slim
+  variables:
+    CODEQUALITY_GLOB: "*.json"
+  script:
+    # combine all individual reports
+    - |
+      python - << EOF
+      import glob, json
+      lines = []
+      for jfile in glob.glob("${CODEQUALITY_GLOB}", recursive=True):
+          print(f"Parsing {jfile}...")
+          with open(jfile, "r") as file:
+              lines.extend(json.load(file))
+      outfile = "gl-code-quality-report.json"
+      with open(outfile, "w") as out:
+          json.dump(lines, out, separators=(",", ":"))
+      print(f"{outfile} written")
+      EOF
+    # print the report
+    - python -m json.tool gl-code-quality-report.json
+  artifacts:
+    reports:
+      codequality: gl-code-quality-report.json

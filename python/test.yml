@@ -1,0 +1,39 @@
+#
+# Test templates for Python projects
+#
+
+include:
+  # NOTE: gitlab-ci's 'include' system can't handle multiple includes
+  #       of the same file, so we have to make each include of
+  #       /python/base.yml unique by adding a unique number of
+  #       leading slashes
+  - local: '/////python/base.yml'
+
+# -- generic pytest job -----
+# install a project, run pytest with coverage and
+#
+.python:pytest:
+  extends:
+    - .python:pip-cache
+  stage: test
+  image: python
+  before_script:
+    - ${PYTHON:="python"} -m pip install ${PIP_OPTIONS} ${INSTALL_TARGET:="."}
+    - ${PYTHON} -m pip install ${PIP_OPTIONS} pytest ${TESTS_REQUIRE}
+  script:
+    # run test suite
+    - ${PYTHON} -m pytest
+          --junitxml=junit.xml
+          --cov-report=
+          --cov=${COVERAGE_TARGET:=${CI_PROJECT_NAME//-/_}}
+          ${PYTEST_OPTIONS}
+  after_script:
+    # print coverage report
+    - ${PYTHON} -m coverage report
+    - ${PYTHON} -m coverage xml -o coverage.xml
+  artifacts:
+    reports:
+      junit: junit.xml
+      cobertura: coverage.xml
+    when: always
+  coverage: '/^TOTAL\s+.*\s+(\d+\.?\d*)%/'

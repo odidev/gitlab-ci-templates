@@ -1,0 +1,373 @@
+#
+# Templates for Python projects
+#
+
+# -- Pip caching ------------
+# default caching for the Pip
+# package cache
+# ---------------------------
+
+.python:cache:
+  variables:
+    PIP_CACHE_DIR: "${CI_PROJECT_DIR}/.cache/pip"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cache/pip
+
+# -- generic job ------------
+# default job template for
+# Python projects, including
+# caching
+# ---------------------------
+
+.python:base:
+  extends:
+    - .python:cache
+  image: python
+  variables:
+    # what Python interpreter to use
+    PYTHON: "python"
+
+# -- simple build ----------
+# simple Python package
+# distribution build job
+# --------------------------
+
+.python:build:
+  extends:
+    - .python:base
+  image: python
+  needs: []
+  variables:
+    # what options to give to python -m build
+    BUILD_OPTIONS: ""
+    # what to install alongside build
+    BUILD_REQUIRES: ""
+    # what options to give to PIP
+    PIP_OPTIONS: ""
+    # whether to generate a tarball (true/false)
+    SDIST: "true"
+    # what directory to run in
+    SRCDIR: "${CI_PROJECT_DIR}"
+    # whether to generate a wheel (true/false)
+    WHEEL: "true"
+  before_script:
+    - ${PYTHON:="python"} -m pip install
+          build
+          ${BUILD_REQUIRES}
+    - ${PYTHON} -m pip list installed
+  script:
+    - ${PYTHON} -m build ${SRCDIR:="."}
+          --outdir ${CI_PROJECT_DIR}
+          $(test ${SDIST} = "true" && echo "--sdist")
+          $(test ${WHEEL} = "true" && echo "--wheel")
+          ${BUILD_OPTIONS}
+  artifacts:
+    paths:
+      - "*.tar.*"
+      - "*.whl"
+
+# -- coverage reporting -----
+# collect coverage.py report
+# as artifact and reports
+# coverage
+# ---------------------------
+
+.python:coverage:
+  extends:
+    - .python:base
+  stage: test
+  image: python
+  variables:
+    # this is here to ensure that each job provides
+    # a unique .coverage file
+    COVERAGE_FILE: ".coverage-${CI_JOB_NAME}"
+  after_script:
+    # print coverage report
+    - ${PYTHON} -m coverage report
+    - ${PYTHON} -m coverage xml -o coverage-${CI_JOB_NAME}.xml
+  artifacts:
+    reports:
+       cobertura: coverage*.xml
+  coverage: '/^TOTAL\s+.*\s+(\d+\.?\d*)%/'
+
+# -- test reporting ---------
+# this was renamed to
+# .python:coverage, so is
+# currently just a redirect
+# ---------------------------
+
+.python:test:
+  # DEPRECATED
+  extends:
+    - .python:coverage
+
+# -- coverage combine -------
+# combine reports from multiple
+# coverage.py jobs
+# ---------------------------
+
+.python:coverage-combine:
+  extends:
+    - .python:coverage
+  stage: .post
+  variables:
+    COVERAGE_FILE: ""  # unset
+    COVERAGE_GLOB: ".coverage*"
+  before_script:
+    - python -m pip install coverage[toml]
+    - python -m pip list installed
+  script:
+    # combine individual reports
+    - python -m coverage combine ${COVERAGE_GLOB}
+    # convert to XML
+    - python -m coverage xml -o coverage.xml
+  after_script:
+    # print coverage report
+    - python -m coverage report
+
+# -- unittest run -----------
+# install a project, run
+# unittests with coverage
+# ---------------------------
+
+.python:unittest:
+  extends:
+    - .python:coverage
+  variables:
+    # the project name to cover
+    # what to install, can be a directory, or path to a distribution
+    INSTALL_TARGET: "${CI_PROJECT_DIR}"
+    # what options to give to PIP
+    PIP_OPTIONS: ""
+    # what to install before running the tests
+    TESTS_REQUIRE: ""
+    # what options to give to python -m unittest
+    UNITTEST_OPTIONS: "discover"
+  before_script:
+    # install this project
+    - ${PYTHON:="python"} -m pip install ${PIP_OPTIONS} ${INSTALL_TARGET:="."}
+    # install the other test requirements (always install coverage)
+    - ${PYTHON} -m pip install ${PIP_OPTIONS} coverage ${TESTS_REQUIRE}
+    # print the package list
+    - ${PYTHON} -m pip list installed
+  script:
+    # run test suite with coverage
+    - ${PYTHON} -m coverage run --source ${COVERAGE_TARGET:=${CI_PROJECT_NAME//-/_}} -m unittest ${UNITTEST_OPTIONS}
+
+# -- pytest run -------------
+# install a project, run
+# pytest with coverage
+# ---------------------------
+
+.python:pytest:
+  extends:
+    - .python:coverage
+  variables:
+    # what to install, can be a directory, or path to a distribution
+    INSTALL_TARGET: "${CI_PROJECT_DIR}"
+    # what options to give to PIP
+    PIP_OPTIONS: ""
+    # what options to give to pytest
+    PYTEST_OPTIONS: ""
+    # what to install alongside pytest
+    TESTS_REQUIRE: ""
+  before_script:
+    # try and install xargs
+    - if $(grep -q debian /etc/os-release); then
+          apt-get -yqq install findutils;
+      elif $(grep -q rhel /etc/os-release); then
+          yum -y -q install findutils;
+      fi
+    # install this project
+    - ${PYTHON:="python"} -m pip install ${PIP_OPTIONS} ${INSTALL_TARGET:="."}
+    # install pytest and the other test requirements
+    - ${PYTHON} -m pip install ${PIP_OPTIONS} pytest pytest-cov ${TESTS_REQUIRE}
+    # print the package list
+    - ${PYTHON} -m pip list installed
+  script:
+    # run test suite with coverage and junit
+    # NOTE: use xargs incase PYTEST_OPTIONS includes quotes, spaces, etc
+    - xargs -t ${PYTHON} -m pytest
+          --junitxml=junit-${CI_JOB_NAME}.xml
+          --cov-report=
+          --cov=${COVERAGE_TARGET:=${CI_PROJECT_NAME//-/_}}
+          <<< ${PYTEST_OPTIONS}
+  artifacts:
+    when: always
+    reports:
+      junit: "junit*.xml"
+
+
+# -- lint with flake8 -------
+# run the flake8 linter
+# ---------------------------
+
+.python:flake8:
+  extends:
+    - .python:base
+  image: python:slim
+  stage: test
+  variables:
+    # what options to give to flake8
+    FLAKE8_OPTIONS: ""
+    # what to lint (default: everything)
+    FLAKE8_TARGET: "."
+    # which python to use
+    PYTHON: "python"
+    # what to install alongside flake8
+    REQUIREMENTS: ""
+  before_script:
+    # install requirements, allowing for extras
+    - ${PYTHON} -m pip install
+          flake8
+          flake8-gl-codeclimate
+          ${REQUIREMENTS}
+    # print the package list
+    - ${PYTHON} -m pip list installed
+  script:
+    # run flake8
+    - xargs -t ${PYTHON} -m flake8 ${FLAKE8_TARGET} <<< ${FLAKE8_OPTIONS}
+  after_script:
+    # run flake8 again to prepare a code quality report
+    # NOTE: the --format=gl-codeclimate needs to come last to supersede
+    #       any other --format options
+    - ${PYTHON} -m flake8
+         ${FLAKE8_OPTIONS}
+         --exit-zero
+         --format gl-codeclimate
+         --output-file flake8-${CI_JOB_NAME}.json
+         ${FLAKE8_TARGET}
+  artifacts:
+    reports:
+      codequality: flake8*.json
+    when: always
+
+# -- lint with radon --------
+# run the radon CC checker
+# ---------------------------
+
+.python:radon:
+  extends:
+    - .python:base
+  image: python:slim
+  stage: test
+  variables:
+    # what analysis to use
+    RADON_METRIC: "cc"
+    # what options to give to radon
+    RADON_OPTIONS: ""
+    # what to lint (default: everything)
+    RADON_TARGET: "."
+    # what to install alongside radon
+    REQUIREMENTS: ""
+  before_script:
+    # install requirements, allowing for extras
+    - ${PYTHON:=python3} -m pip install
+          radon
+          ${REQUIREMENTS}
+    # print the package list
+    - ${PYTHON} -m pip list installed
+  script:
+    # run radon
+    - ${PYTHON} -m radon ${RADON_METRIC} ${RADON_OPTIONS} ${RADON_TARGET}
+  after_script:
+    # run radon again to prepare a code quality report
+    - |
+      ${PYTHON} -m radon ${RADON_METRIC} ${RADON_OPTIONS} --codeclimate ${RADON_TARGET} \
+      | ${PYTHON} -c "
+      import json, sys
+      lines = []
+      for line in sys.stdin.read().split('\x00'):
+          if not line: continue
+          lines.append(json.loads(line))
+          lines[-1].setdefault('severity', 'minor')
+      with open('radon.json', 'w') as file:
+          json.dump(lines, file)
+      "
+  artifacts:
+    reports:
+      codequality: radon.json
+    when: always
+
+# -- mkdocs -----------------
+# run mkdocs over this project
+# ---------------------------
+
+.python:mkdocs:
+  extends:
+    - .python:base
+  variables:
+    # what options to give to mkdocs
+    MKDOCS_OPTIONS: ""
+    # what to install alongside mkdocs
+    REQUIREMENTS: ""
+    # what options to give to PIP
+    PIP_OPTIONS: ""
+  before_script:
+    - ${PYTHON:=python} -m pip install ${PIP_OPTIONS} mkdocs ${REQUIREMENTS}
+    - ${PYTHON} -m pip list installed
+  script:
+    - ${PYTHON:=python} -m mkdocs build ${MKDOCS_OPTIONS}
+  artifacts:
+    expose_as: site
+    paths:
+      - site/index.html
+      - site
+
+# -- sphinx docs ------------
+# run sphinx over this project
+# ---------------------------
+
+.python:sphinx:
+  extends:
+    - .python:base
+  variables:
+    # which sphinx builder to use
+    BUILDER: "html"
+    # what options to give to PIP
+    PIP_OPTIONS: ""
+    # what to install alongside sphinx
+    REQUIREMENTS: ""
+    # where to run the docs from
+    SOURCEDIR: "docs"
+    # what options to give to sphinx
+    SPHINX_OPTIONS: ""
+  before_script:
+    - ${PYTHON:=python} -m pip install ${PIP_OPTIONS} sphinx ${REQUIREMENTS}
+    - ${PYTHON} -m pip list installed
+  script:
+    - pushd ${SOURCEDIR:=docs}
+    - if [ -f Makefile ]; then
+          make ${BUILDER} BUILDDIR="${CI_PROJECT_DIR}/_build" SPHINXOPTS="${SPHINXOPTS}";
+      else
+          ${PYTHON:=python} -m sphinx -b ${BUILDER} . "${CI_PROJECT_DIR}/_build/${BUILDER}" ${SPHINXOPTS};
+      fi
+    - popd
+    - mv -v ${CI_PROJECT_DIR}/_build/${BUILDER} html
+  artifacts:
+    expose_as: html
+    paths:
+      - html/index.html
+      - html
+
+# -- upload packages ---------------
+# upload packages to PyPI with Twine
+# ----------------------------------
+
+.python:twine:
+  extends:
+    - .python:base
+  variables:
+    # what options to give to PIP
+    PIP_OPTIONS: ""
+    # PyPI username
+    TWINE_USERNAME: "__token__"
+    # PyPI password (set this using a protected group or protected variable)
+    TWINE_PASSWORD: ""
+  before_script:
+    - ${PYTHON:="python"} -m pip install twine
+    - ${PYTHON} -m pip list installed
+  script:
+    - twine upload $(find -name '*.tar.*' -or -name '*.whl')

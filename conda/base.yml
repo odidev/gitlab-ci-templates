@@ -1,0 +1,61 @@
+#
+# generic config for conda jobs
+#
+
+# ---------------------------
+# good defaults for Conda variables
+#
+# probably don't change these unless you have
+# a good reason, and know what you're doing
+# ---------------------------
+
+.conda:variables:
+  variables:
+    # path of conda configuration
+    CONDARC: "${CI_PROJECT_DIR}/.condarc"
+    # output directory for conda-build
+    CONDA_BLD_PATH: "${CI_PROJECT_DIR}/conda-bld"
+    # environments base directory
+    CONDA_ENVS_PATH: "${CI_PROJECT_DIR}/envs"
+    # package cache directory
+    CONDA_PKGS_DIRS: "${CI_PROJECT_DIR}/.cache/conda/pkgs"
+
+# ---------------------------
+# default caching for the conda
+# package cache
+# ---------------------------
+
+.conda:cache:
+  extends:
+    - .conda:variables
+  after_script:
+    # remove the unpacked conda tarballs from the
+    # package cache
+    - find ${CONDA_PKGS_DIRS%%:*}
+          -mindepth 1
+          -maxdepth 1
+          -type d
+          -exec rm -rf {} \;
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cache/
+
+# ---------------------------
+# default job configuration
+# including configuring Conda
+# ---------------------------
+
+.conda:base:
+  extends:
+    - .conda:cache
+  image: continuumio/miniconda3
+  before_script:
+    # setup the shell to see conda
+    - . $(conda info --base)/etc/profile.d/conda.sh
+    # don't ask for confirmation on conda commands
+    - conda config --file ${CONDARC} --set always_yes yes
+    # print the conda configuration
+    - conda info --all
+    # print the conda config files
+    - conda config --show-sources

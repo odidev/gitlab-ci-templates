@@ -1,0 +1,124 @@
+# -- anchors ----------------
+
+# configure the apt cache
+.apt-configure-cache: &configure-apt-cache
+  echo "Dir::Cache \"${APT_CACHE_DIR:=${CI_PROJECT_DIR}/.cache/apt}\";" > /etc/apt/apt.conf.d/99cache.conf &&
+  mkdir -p "${APT_CACHE_DIR}/archive/partial"
+
+# update the local APT packages
+.apt-update: &apt-update
+  apt-get autoclean && apt-get ${APT_OPTIONS} update
+
+# -- debian templates -------
+
+.debian-variables:
+  variables:
+    APT_CACHE_DIR: "${CI_PROJECT_DIR}/.cache/apt"
+    APT_OPTIONS: "-y -q -q"
+
+.apt-cache: &apt-cache
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cache/apt
+
+.debian:base:
+  extends:
+    - .debian-variables
+    - .apt-cache
+  image: debian
+  before_script:
+    - *configure-apt-cache
+    - *apt-update
+
+# -- source -----------------
+#
+# build a debian source package
+# using dpkg-source
+#
+
+.debian:dsc:
+  extends:
+    - .debian:base
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - *configure-apt-cache
+    - *apt-update
+    - apt-get ${APT_OPTIONS} install
+          dpkg-dev
+          ${DSC_DEPENDENCIES}
+  script:
+    # extract tarball
+    - mkdir src
+    - tar -xf ${TARBALL:="${CI_PROJECT_NAME}*.tar.*"} -C src --strip-components=1
+    # rename tarball for debian orig
+    - _orig=$(basename ${TARBALL} | sed 's|\(.*\)-\(.*\).\(tar\..*\)|\1_\2.orig.tar.gz|')
+    - mv -v ${TARBALL} "${_orig}"
+    # create debian source package files
+    - dpkg-source --build src
+  artifacts:
+    paths:
+      - "*.orig.tar.*"
+      - "*.debian.tar.*"
+      - "*.dsc"
+
+# -- binary build -----------
+#
+# build one or more binary debian
+# packages using dpkg-buildpackage
+#
+
+.debian:deb:
+  extends:
+    - .debian:base
+  variables:
+    GIT_STRATEGY: none
+  before_script:
+    - *configure-apt-cache
+    - *apt-update
+    - apt-get ${APT_OPTIONS} install
+          dpkg-dev
+          devscripts
+  script:
+    # unpack source package
+    - dpkg-source --extract ${DSC:="${CI_PROJECT_NAME}_*.dsc"} src
+    - pushd src
+    # install build dependencies
+    - mk-build-deps
+          --tool "apt-get ${APT_OPTIONS} -o Debug::pkgProblemResolver=yes --no-install-recommends"
+          --install
+          --remove
+    # build debian packages
+    - dpkg-buildpackage -us -uc -b
+    - popd
+    # print contents of packages
+    - for debf in *.deb; do
+          echo "===== ${debf}";
+          dpkg --info "${debf}";
+          dpkg --contents "${debf}";
+      done
+  artifacts:
+    paths:
+      - "*.buildinfo"
+      - "*.changes"
+      - "*.deb"
+
+# -- lint -------------------
+#
+# run lintian against a set of debs
+#
+
+.debian:lint:
+  extends:
+    - .debian:base
+  variables:
+    GIT_STRATEGY: none
+    LINTIAN_OPTIONS: "--color=auto"
+    LINTIAN_TARGET: '*.changes'
+  before_script:
+    - *configure-apt-cache
+    - *apt-update
+    - apt-get ${APT_OPTIONS} install lintian
+  script:
+    - lintian ${LINTIAN_OPTIONS} ${LINTIAN_TARGET}

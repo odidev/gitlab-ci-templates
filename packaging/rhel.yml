@@ -1,0 +1,138 @@
+# -- anchors ----------------
+
+# configure yum/dnf to cache packages locally
+.yum-configure-cache: &configure-yum-cache
+  _config_manager_args="--save --setopt=cachedir=${YUM_CACHE_DIR:=${CI_PROJECT_DIR}/.cache/yum} --setopt=keepcache=1" &&
+  if [ "${YUM_EXE:=yum}" = "dnf" ]; then
+      dnf ${YUM_OPTIONS} -y install "dnf-command(config-manager)" &&
+      dnf config-manager ${_config_manager_args};
+  else
+      ${YUM_EXE} ${YUM_OPTIONS} -y install "yum-utils" &&
+      yum-config-manager ${_config_manager_args} 1>/dev/null;
+  fi
+
+# enable the powertools repo for Centos 8
+.yum-enable-powertools: &yum-enable-powertools
+  if grep -q "centos:8" /etc/os-release && [ "${POWERTOOLS}" = true ]; then
+      dnf ${YUM_OPTIONS} -y install dnf-plugins-core &&
+      dnf config-manager --set-enabled powertools;
+  fi
+
+# install and configure EPEL
+.yum-install-epel: &yum-install-epel
+  if [ "${EPEL}" = true ]; then
+      ${YUM_EXE:=yum} ${YUM_OPTIONS} -y install epel-release &&
+      ${YUM_EXE} ${YUM_OPTIONS} -y install epel-rpm-macros;
+  fi
+
+# -- job templates ----------
+
+.rhel-variables:
+  variables:
+    EPEL: "false"
+    POWERTOOLS: "false"
+    YUM_CACHE_DIR: "${CI_PROJECT_DIR}/.cache/yum"
+    YUM_EXE: "yum"
+    YUM_OPTIONS: "-y -q"
+
+.yum-cache: &yum-cache
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cache/yum
+
+.rhel:base:
+  extends:
+    - .rhel-variables
+    - .yum-cache
+  before_script:
+    - *configure-yum-cache
+    - *yum-enable-powertools
+    - *yum-install-epel
+
+# -- srpm -------------------
+
+.rhel:srpm:
+  extends:
+    - .rhel:base
+  image: centos
+  variables:
+    EPEL: "false"
+    GIT_STRATEGY: none
+    POWERTOOLS: "false"
+  before_script:
+    - *configure-yum-cache
+    - *yum-enable-powertools
+    - *yum-install-epel
+    - ${YUM_EXE} ${YUM_OPTIONS} install
+          rpm-build
+          ${SRPM_DEPENDENCIES}
+  script:
+    # build the src.rpm
+    - rpmbuild -ts --define "_srcrpmdir ${CI_PROJECT_DIR}" ${TARBALL:="${CI_PROJECT_NAME}*.tar.*"}
+  artifacts:
+    paths:
+      - "*.src.rpm"
+
+# -- binary rpm -------------
+
+.rhel:rpm:
+  extends:
+    - .rhel:base
+  image: centos
+  variables:
+    EPEL: "false"
+    GIT_STRATEGY: none
+    POWERTOOLS: "false"
+  before_script:
+    - *configure-yum-cache
+    - *yum-enable-powertools
+    - *yum-install-epel
+    - ${YUM_EXE} ${YUM_OPTIONS} install
+          rpm-build
+          yum-utils
+  script:
+    # install build dependencies for src rpm
+    - yum-builddep ${YUM_OPTIONS} ${SRPM:="${CI_PROJECT_NAME}-*.src.rpm"}
+    # build binary rpms and move them into this directory
+    - rpmbuild --rebuild --define "_rpmdir $(pwd)" ${SRPM}
+    - rm -f ${SRPM}
+    - mv */*.rpm .
+    # list the contents of the rpms
+    - for rpmf in *.rpm; do
+          echo "===== ${rpmf}" &&
+          rpm -qlp "${rpmf}" &&
+          echo "Files:" &&
+          rpm -qip "${rpmf}" &&
+          echo "Provides:" &&
+          rpm -qp --provides "${rpmf}" &&
+          echo "Requires:" &&
+          rpm -qp --requires "${rpmf}";
+      done
+  artifacts:
+    paths:
+      - "*.rpm"
+
+# -- lint -------------------
+#
+# runs rpmlint against a set of RPMs
+#
+
+.rhel:lint:
+  extends:
+    - .rhel:base
+  image: centos:8
+  variables:
+    GIT_STRATEGY: none
+    RPMLINT_OPTIONS: '--info'
+    RPMS: '*.rpm'
+  before_script:
+    - *configure-yum-cache
+    - *yum-enable-powertools
+    - *yum-install-epel
+    - ${YUM_EXE} ${YUM_OPTIONS} install rpmlint
+  script:
+    - rpmlint --rawout rpmlint.log ${RPMLINT_OPTIONS} ${RPMS}
+  artifacts:
+    paths:
+      - rpmlint.log

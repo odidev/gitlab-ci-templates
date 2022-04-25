@@ -1,0 +1,85 @@
+#
+# Gitlab-CI job templates for MacPorts jobs
+#
+
+.install-macports: &install-macports |
+  # only install if we don't have a copy of macports already
+  if [[ ! -e "${MACPORTS_PREFIX:=${CI_PROJECT_DIR}/macports}/bin/port" ]]; then
+      # download the latest release tarball for macports
+      TARGZ_URL=$(
+      curl -s https://api.github.com/repos/macports/macports-base/releases/latest |
+      python3 -c "
+  import json, sys;
+  data = json.load(sys.stdin);
+  for asset in data['assets']:
+      if asset['name'].endswith('.tar.gz'):
+          print(asset['browser_download_url']);
+          break
+  ")
+      curl -s -L ${TARGZ_URL} -o macports.tar.gz
+      echo -e "\x1B[92mDownloaded ${TARGZ_URL}\x1B[0m"
+      # unpack the tarball and build it
+      mkdir -p src
+      tar -xf macports.tar.gz --strip-components=1 --directory src
+      cd src
+      echo -e "\x1B[92mBuilding MacPorts...\x1B[0m"
+      ./configure \
+          --prefix="${MACPORTS_PREFIX}" \
+          --silent \
+          --with-no-root-privileges \
+          --with-install-user=$(id -un) \
+          --with-install-group=$(id -gn) \
+      ;
+      make -s -j ${CPU_COUNT:=2}
+      make -s -j ${CPU_COUNT} install
+      cd -
+      rm -rf macports.tar.gz
+      # update the macports configuration to not install __anything__
+      # outside of our build directory
+      if [[ "${MACPORTS_PREFIX}" == "${CI_PROJECT_DIR}"* ]]; then
+          sed -i.tmp s'|^applications_dir.*$|applications_dir '${CI_PROJECT_DIR}'/Applications|g' ${MACPORTS_PREFIX}/etc/macports/macports.conf
+      fi
+  fi
+  # if we _own_ the macports installation, update it
+  if [[ -O "${MACPORTS_PREFIX}/bin/port" ]]; then
+      # update ports
+      ${MACPORTS_PREFIX}/bin/port -q selfupdate
+      # clean up after ourselves
+      ${MACPORTS_PREFIX}/bin/port -q reclaim
+  fi
+
+.configure-macports-ccache: &configure-macports-ccache |
+  # enable ccache
+  if [ "${MACPORTS_CCACHE:-false}" == "true" ]; then
+    port -q install ccache;
+    sed -i.tmp s'|^configureccache.*$|configureccahe yes|g' ${MACPORTS_PREFIX}/etc/macports/macports.conf;
+  fi
+
+# -- generic job ------------
+# default job template for
+# Macports-based jobs, including
+# basic configuration
+# ---------------------------
+
+.macports:base:
+  variables:
+    MACPORTS_CCACHE: "false"
+    MACPORTS_PREFIX: "${CI_PROJECT_DIR}/macports"
+  tags:
+    - macos
+  before_script:
+    # install macports
+    - *install-macports
+    # configure macports
+    - . ${MACPORTS_PREFIX}/share/macports/setupenv.bash
+    # configure ccache
+    - *configure-macports-ccache
+    # print some info
+    - port version
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      # ccache
+      - macports/var/build/.ccache
+      # binary archive
+      - macports/var/macports/software

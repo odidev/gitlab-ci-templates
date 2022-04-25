@@ -1,0 +1,95 @@
+#
+# Templates for Docker builds
+#
+
+# -- Docker build -----------
+# build a docker image, and
+# push to the local registry,
+# hub.docker.com, and quay.io
+# ---------------------------
+
+.docker:build:
+  image: docker:latest
+  variables:
+    # which path to build, defaults to the project root
+    BUILD_PATH: "$CI_PROJECT_DIR"
+    # what tag to use for the local container registry,
+    # defauts to the current commit ref
+    CI_REGISTRY_TAG: "$CI_COMMIT_SHA"
+    # which file to use for the dockerfile
+    DOCKERFILE: "$CI_PROJECT_DIR/Dockerfile"
+    # whether to push to the local registry
+    PUSH_TO_REGISTRY: "true"
+  before_script:
+    docker login -u gitlab-ci-token -p ${CI_JOB_TOKEN} ${CI_REGISTRY}
+  script:
+    - IMAGE="${CI_REGISTRY_IMAGE}:${CI_REGISTRY_TAG}"
+    # run the build job
+    - docker build
+          --pull
+          --tag ${IMAGE}
+          --file ${DOCKERFILE}
+          ${BUILD_PATH}
+    # push to the local registry
+    - if ${PUSH_TO_REGISTRY}; then docker push ${IMAGE}; fi
+  after_script:
+    # logout from the local registry
+    - docker logout ${CI_REGISTRY}
+
+# -- Docker push ------------
+# pull a docker image from
+# the local registry, re-tag
+# it, then push it out
+# (optionally to a different
+# registry, e.g. docker hub)
+# ---------------------------
+
+.docker:push:
+  image: docker:latest
+  variables:
+    # don't need the git repository
+    GIT_STRATEGY: none
+    # -- local registry options
+    PULL_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHA"
+    # -- remote registry options
+    PUSH_IMAGE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG"
+    REGISTRY: "$CI_REGISTRY"
+    REGISTRY_USER_NAME: "gitlab-ci-token"
+    REGISTRY_USER_TOKEN: "$CI_JOB_TOKEN"
+  before_script:
+    # login
+    - docker login -u ${REGISTRY_USER_NAME} -p ${REGISTRY_USER_TOKEN} ${REGISTRY}
+  script:
+    # pull from the local registry
+    - docker pull ${PULL_IMAGE}
+    # prepend the registry to the push image if necessary
+    - if [[ "${PUSH_IMAGE}" != "${REGISTRY}/"* ]]; then
+          PUSH_IMAGE="${REGISTRY}/${PUSH_IMAGE}";
+      fi
+    # tag the image
+    - docker tag ${PULL_IMAGE} ${PUSH_IMAGE}
+    # push back out
+    - docker push ${PUSH_IMAGE}
+  after_script:
+    # logout
+    - docker logout ${REGISTRY}
+
+# -- docker.io push
+
+.docker:push:docker_io:
+  extends:
+    - .docker:push
+  variables:
+    REGISTRY: "docker.io"
+    REGISTRY_USER_NAME: "$DOCKER_HUB_USER"
+    REGISTRY_USER_TOKEN: "$DOCKER_HUB_TOKEN"
+
+# -- quay.io push
+
+.docker:push:quay_io:
+  extends:
+    - .docker:push
+  variables:
+    REGISTRY: "quay.io"
+    REGISTRY_USER_NAME: "$QUAY_USER"
+    REGISTRY_USER_TOKEN: "$QUAY_TOKEN"

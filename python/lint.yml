@@ -1,0 +1,39 @@
+#
+# Lint templates for python projects
+#
+
+# include the base templates
+include:
+  # NOTE: gitlab-ci's 'include' system can't handle multiple includes
+  #       of the same file, so we have to make each include of
+  #       /python/base.yml unique by adding a unique number of
+  #       leading slashes
+  - local: '////python/base.yml'
+
+.python:flake8:
+  extends:
+    - .python:base
+  image: python:slim
+  stage: test
+  before_script:
+    # install requirements, allowing for extras
+    - ${PYTHON:=python} -m pip install
+          flake8
+          flake8-codeclimate
+          ${FLAKE8_PLUGINS}
+  script:
+    # run first for codeclimate (using --exit-zero)
+    # NOTE: the --format=codeclimate needs to come last to supersede
+    #       any other --format options
+    - ${PYTHON} -m flake8
+         --exit-zero
+         ${FLAKE8_OPTIONS}
+         --format codeclimate
+         ${FLAKE8_TARGET:="."}
+      | ${PYTHON} -c 'from sys import stdin; print("[{}]".format(",".join(map(str.strip, stdin))))'
+      > flake8.json
+    # run again to get plaintxt output for the user
+    - ${PYTHON} -m flake8 ${FLAKE8_OPTIONS} ${FLAKE8_TARGET}
+  artifacts:
+    reports:
+      codequality: flake8.json

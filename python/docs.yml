@@ -1,0 +1,47 @@
+#
+# Documentation jobs for python projects
+#
+
+include:
+  # NOTE: gitlab-ci's 'include' system can't handle multiple includes
+  #       of the same file, so we have to make each include of
+  #       /python/base.yml unique by adding a unique number of
+  #       leading slashes
+  - local: '///python/base.yml'
+
+.python:mkdocs:
+  extends:
+    - .python:base
+  image: python
+  variables:
+    REQUIREMENTS: "mkdocs"
+  before_script:
+    - ${PYTHON:=python} -m pip install ${REQUIREMENTS}
+  script:
+    - ${PYTHON:=python} -m mkdocs build
+          ${MKDOCS_OPTIONS}
+  artifacts:
+    paths:
+      - site
+
+.python:sphinx:
+  extends:
+    - .python:base
+  variables:
+    REQUIREMENTS: "sphinx"
+    SPHINXOPTS: ""
+    SOURCEDIR: "docs"
+  before_script:
+    - ${PYTHON:=python} -m pip install ${REQUIREMENTS}
+  script:
+    - pushd ${SOURCEDIR:=docs}
+    - if [ -f Makefile ]; then
+          make html BUILDDIR="${CI_PROJECT_DIR}/_build" SPHINXOPTS="${SPHINXOPTS}";
+      else
+          python -m sphinx -b html . "${CI_PROJECT_DIR}/_build" ${SPHINXOPTS};
+      fi
+    - popd
+    - mv -v ${CI_PROJECT_DIR}/_build/html html
+  artifacts:
+    paths:
+      - html

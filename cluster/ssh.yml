@@ -1,0 +1,22 @@
+# Execute remote commands on LIGO Data Grid clusters.
+# Place your base64-encoded conents of your Kerberos keytab in a
+# protected CI variable called ROBOT_KEYTAB.
+
+.ssh: &ssh
+  image:
+    name: igwn/ssh
+    entrypoint: [""]
+  before_script:
+    - echo -e "section_start:`date +%s`:ssh_setup\r\e[0KLoading SSH credentials"
+    # Decode base64-encoded keytab
+    - echo "${ROBOT_KEYTAB}" | base64 -d | install -m 0600 /dev/stdin keytab
+    # Read principal from first entry in keytab
+    - PRINCIPAL=$(klist -k keytab | head -n 4 | tail -n 1 | sed -E 's/^.* +//')
+    # Create X.509 certificate
+    - kinit $PRINCIPAL -k -t keytab
+    - rm keytab
+    - ligo-proxy-init -k -p
+    - grid-proxy-info -identity
+    # Configure gsissh: default port and usernames
+    - mkdir -p ~/.ssh
+    - echo -e "section_end:`date +%s`:ssh_setup\r\e[0K"

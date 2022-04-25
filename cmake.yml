@@ -1,0 +1,62 @@
+#
+# Gitlab-CI job templates for CMake builds
+#
+
+# -- cmake build ------------
+# template for standard CMake
+# configure/build/install/test
+# workflow
+# ---------------------------
+
+.cmake:build:
+  variables:
+    # number of CPUs to use
+    CPU_COUNT: 4
+    # if 'true' build in a separate directory
+    OUT_OF_TREE: "true"
+    # what directory to build from
+    SRCDIR: "${CI_PROJECT_DIR}"
+  script:
+    # get absolute path of SRCDIR, just in case
+    - SRCDIR=$(cd ${SRCDIR:-${CI_PROJECT_DIR}} && pwd)
+    # build out-of-tree
+    - if ${OUT_OF_TREE}; then
+          rm -rf _build;
+          mkdir -p _build;
+          cd _build;
+      fi
+    # configure
+    # NOTE: jobs that extend this template can customise the cmake
+    #       execution using the CMAKE_ARGS environment variable,
+    #       using `xargs -t ... <<< ${CMAKE_ARGS}` allows CMAKE_ARGS
+    #       to have arbitrary quotes, spaces, etc, and bash still handle
+    #       it properly.
+    - xargs -t cmake ${SRCDIR}
+          -DCMAKE_VERBOSE_MAKEFILE:BOOL=yes
+          <<< ${CMAKE_ARGS}
+    # build
+    - cmake --build . --parallel ${CPU_COUNT} --verbose
+    # install
+    - cmake --build . --parallel ${CPU_COUNT} --verbose --target install
+    # test
+    - ctest --parallel ${CPU_COUNT} --verbose
+
+# -- cmake pack -------------
+# template to use CMake to
+# generate a source
+# distribution (tarball)
+# ---------------------------
+
+.cmake:pack:
+  variables:
+    # what directory to build from
+    SRCDIR: "${CI_PROJECT_DIR}"
+  script:
+    # get absolute path of SRCDIR, just in case
+    - SRCDIR=$(cd ${SRCDIR:-${CI_PROJECT_DIR}} && pwd)
+    # build a source distribution
+    - xargs -t cmake ${SRCDIR} <<< ${CMAKE_ARGS}
+    - cmake --build . --target package_source --verbose
+  artifacts:
+    paths:
+      - "*.tar.*"

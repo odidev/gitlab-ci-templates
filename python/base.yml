@@ -1,0 +1,17 @@
+#
+# generic config for python jobs
+#
+
+# download pip packages to a specific directory, and cache it
+.python:pip-cache:
+  variables:
+    PIP_CACHE_DIR: "${CI_PROJECT_DIR}/.cache/pip"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .cache/pip
+
+.python:base:
+  extends:
+    - .python:pip-cache
+  image: python

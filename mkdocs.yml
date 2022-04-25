@@ -1,0 +1,65 @@
+# metadata
+site_name: "IGWN | Gitlab CI Templates"
+site_description: "IGWN Gitlab CI Templates"
+site_author: "IGWN Computing"
+site_url: "https://computing.docs.ligo.org/gitlab-ci-templates/"
+repo_url: "https://git.ligo.org/computing/gitlab-ci-templates/"
+repo_name: "GitLab"
+edit_uri: "edit/master/docs"
+copyright: "Copyright &copy; 2021 The International Gravitational-wave Observatory Network"
+
+# configuration
+theme:
+  name: 'material'
+  custom_dir: 'theme'
+  favicon: 'assets/images/favicon.ico'
+  language: en
+  logo: 'assets/images/logo.png'
+  features:
+    - navigation.sections
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: igwn
+      toggle:
+        icon: material/eye-outline
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: orange
+      accent: orange
+      toggle:
+        icon: material/eye
+        name: Switch to light mode
+
+# plugins
+plugins:
+  - minify:
+      minify_html: true
+  - search
+
+# extensions
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - toc:
+      permalink: true
+
+# layout
+nav:
+ - Home: index.md
+ - Templates:
+   - CMake: cmake.md
+   - Code Quality: codequality.md
+   - Conda: conda.md
+   - Debian: debian.md
+   - Docker: docker.md
+   - RHEL: rhel.md
+   - Python: python.md
+
+# links
+extra:
+  # hide the 'powered by MkDocs' footer entry, that's provided by the theme
+  generator: false
